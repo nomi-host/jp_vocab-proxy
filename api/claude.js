@@ -2,17 +2,34 @@
 // POST { prompt } -> { ...parsedJson } | { error }
 // env: ANTHROPIC_API_KEY
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+// 허용 도메인(우리 앱)에서 온 요청만 받도록 제한. 빈 배열이면 전체 허용.
+const ALLOWED_ORIGINS = [
+  'https://nomi-host.github.io',
+];
+
+function pickOrigin(req) {
+  const origin = req.headers.origin || '';
+  if (ALLOWED_ORIGINS.length === 0) return '*';
+  if (ALLOWED_ORIGINS.includes(origin)) return origin;
+  return ALLOWED_ORIGINS[0]; // 기본값(차단된 origin엔 쿠키/CORS 불일치로 막힘)
+}
 
 module.exports = async (req, res) => {
-  for (const k in CORS) res.setHeader(k, CORS[k]);
+  const allowOrigin = pickOrigin(req);
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return; }
+
+  // origin 제한: 허용 목록에 없으면 거부
+  const origin = req.headers.origin || '';
+  if (ALLOWED_ORIGINS.length > 0 && origin && !ALLOWED_ORIGINS.includes(origin)) {
+    res.status(403).json({ error: 'forbidden origin' });
+    return;
+  }
 
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) { res.status(500).json({ error: 'no ANTHROPIC_API_KEY' }); return; }
