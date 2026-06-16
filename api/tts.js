@@ -25,13 +25,18 @@ function rateLimited(ip) {
   return arr.length > RATE_MAX;
 }
 
+// 성별 고정 시 항상 같은 목소리가 나오도록 대표 음성을 지정한다.
+// (이전엔 매 요청마다 랜덤으로 뽑아 단어/예문/속도마다 사람이 바뀌는 문제가 있었음)
+const FIXED_FEMALE = "Aoede"; // 대표 여성
+const FIXED_MALE = "Alnilam";  // 대표 남성
+
 function pickVoice(gender, name) {
   // 특정 이름이 지정되면 그대로 사용
   if (name && /^[A-Za-z]+$/.test(name)) return "ja-JP-Chirp3-HD-" + name;
-  let pool;
-  if (gender === "female") pool = VOICES.female;
-  else if (gender === "male") pool = VOICES.male;
-  else pool = VOICES.female.concat(VOICES.male); // random = 전체에서
+  if (gender === "female") return "ja-JP-Chirp3-HD-" + FIXED_FEMALE;
+  if (gender === "male") return "ja-JP-Chirp3-HD-" + FIXED_MALE;
+  // random: 전체에서 매번 다르게
+  const pool = VOICES.female.concat(VOICES.male);
   const pickName = pool[Math.floor(Math.random() * pool.length)];
   return "ja-JP-Chirp3-HD-" + pickName;
 }
