@@ -39,15 +39,9 @@ function rateLimited(ip) {
 }
 
 // 언어/성별/이름에 맞는 음성 풀네임을 만든다.
-// 일본어: 기존과 동일하게 Chirp3-HD 특정 음성을 지정.
-// 한국어: Chirp3-HD 음성 이름이 언어별로 다를 수 있어, 이름을 비우고
-//         languageCode(ko-KR)만 줘서 구글이 기본 한국어 음성을 고르게 한다(가장 안전).
+// 일본어/한국어 모두 Chirp3-HD 음성을 성별에 맞춰 지정한다.
+// (Chirp3-HD 음성 이름은 언어 간 공통이며, languageCode로 해당 언어 발음이 적용된다.)
 function pickVoice(lang, gender, name) {
-  if (lang === "ko") {
-    // 특정 이름을 명시적으로 보냈을 때만 사용, 아니면 null(=languageCode 기본)
-    if (name && /^[A-Za-z-]+$/.test(name)) return name;
-    return null;
-  }
   const L = LANG[lang] || LANG.ja;
   const prefix = L.code + "-Chirp3-HD-";
   if (name && /^[A-Za-z]+$/.test(name)) return prefix + name;
