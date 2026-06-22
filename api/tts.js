@@ -1,6 +1,11 @@
-// /api/tts.js — Google Cloud Text-to-Speech 프록시 (Chirp 3: HD, 일본어)
+// /api/tts.js — Google Cloud Text-to-Speech 프록시 (Chirp 3: HD)
 // 앱(브라우저)에서 텍스트를 보내면, 서버가 Google TTS를 호출해 MP3(base64)를 돌려준다.
 // 키는 Vercel 환경변수 GOOGLE_TTS_KEY 에만 존재하며 브라우저에 노출되지 않는다.
+//
+// [이번 변경] 일본어 전용 → 일본어/한국어 둘 다 지원.
+//   body.lang 으로 언어를 받는다: "ja"(기본) | "ko"
+//   - lang 없거나 "ja": 기존과 100% 동일하게 동작(일본어 Chirp3-HD).
+//   - lang "ko": 한국어 음성으로 읽는다.
 
 // --- 보안 설정 -------------------------------------------------------------
 const ALLOWED_ORIGINS = ["https://nomi-host.github.io"]; // 우리 앱만 허용
@@ -8,11 +13,19 @@ const RATE_MAX = 40;          // IP당 60초에 최대 호출 수 (예문/단어
 const RATE_WINDOW = 60 * 1000;
 const MAX_TEXT = 400;         // 한 번에 읽을 최대 글자 수 (예문은 짧음)
 
-// --- Chirp 3: HD 일본어 음성 목록 (성별별) ---------------------------------
-// 이름 형식: ja-JP-Chirp3-HD-<이름>
+// --- Chirp 3: HD 음성 목록 (언어별/성별별) ---------------------------------
+// 이름 형식: <languageCode>-Chirp3-HD-<이름>
 const VOICES = {
-  female: ["Aoede", "Kore", "Leda", "Zephyr", "Autonoe", "Callirrhoe", "Despina", "Erinome", "Gacrux", "Laomedeia", "Sulafat", "Vindemiatrix", "Achernar", "Pulcherrima"],
-  male:   ["Puck", "Charon", "Fenrir", "Orus", "Algenib", "Algieba", "Alnilam", "Achird", "Enceladus", "Iapetus", "Rasalgethi", "Sadachbia", "Schedar", "Umbriel", "Zubenelgenubi", "Sadaltager"],
+  ja: {
+    female: ["Aoede", "Kore", "Leda", "Zephyr", "Autonoe", "Callirrhoe", "Despina", "Erinome", "Gacrux", "Laomedeia", "Sulafat", "Vindemiatrix", "Achernar", "Pulcherrima"],
+    male:   ["Puck", "Charon", "Fenrir", "Orus", "Algenib", "Algieba", "Alnilam", "Achird", "Enceladus", "Iapetus", "Rasalgethi", "Sadachbia", "Schedar", "Umbriel", "Zubenelgenubi", "Sadaltager"],
+  },
+};
+
+// 언어별 languageCode 와 대표(고정) 음성
+const LANG = {
+  ja: { code: "ja-JP", fixedFemale: "Aoede", fixedMale: "Alnilam" },
+  ko: { code: "ko-KR", fixedFemale: "Aoede", fixedMale: "Alnilam" },
 };
 
 const rateMap = new Map(); // ip -> [timestamps]
@@ -25,20 +38,25 @@ function rateLimited(ip) {
   return arr.length > RATE_MAX;
 }
 
-// 성별 고정 시 항상 같은 목소리가 나오도록 대표 음성을 지정한다.
-// (이전엔 매 요청마다 랜덤으로 뽑아 단어/예문/속도마다 사람이 바뀌는 문제가 있었음)
-const FIXED_FEMALE = "Aoede"; // 대표 여성
-const FIXED_MALE = "Alnilam";  // 대표 남성
-
-function pickVoice(gender, name) {
-  // 특정 이름이 지정되면 그대로 사용
-  if (name && /^[A-Za-z]+$/.test(name)) return "ja-JP-Chirp3-HD-" + name;
-  if (gender === "female") return "ja-JP-Chirp3-HD-" + FIXED_FEMALE;
-  if (gender === "male") return "ja-JP-Chirp3-HD-" + FIXED_MALE;
-  // random: 전체에서 매번 다르게
-  const pool = VOICES.female.concat(VOICES.male);
+// 언어/성별/이름에 맞는 음성 풀네임을 만든다.
+// 일본어: 기존과 동일하게 Chirp3-HD 특정 음성을 지정.
+// 한국어: Chirp3-HD 음성 이름이 언어별로 다를 수 있어, 이름을 비우고
+//         languageCode(ko-KR)만 줘서 구글이 기본 한국어 음성을 고르게 한다(가장 안전).
+function pickVoice(lang, gender, name) {
+  if (lang === "ko") {
+    // 특정 이름을 명시적으로 보냈을 때만 사용, 아니면 null(=languageCode 기본)
+    if (name && /^[A-Za-z-]+$/.test(name)) return name;
+    return null;
+  }
+  const L = LANG[lang] || LANG.ja;
+  const prefix = L.code + "-Chirp3-HD-";
+  if (name && /^[A-Za-z]+$/.test(name)) return prefix + name;
+  if (gender === "female") return prefix + L.fixedFemale;
+  if (gender === "male") return prefix + L.fixedMale;
+  const v = VOICES[lang] || VOICES.ja;
+  const pool = v.female.concat(v.male);
   const pickName = pool[Math.floor(Math.random() * pool.length)];
-  return "ja-JP-Chirp3-HD-" + pickName;
+  return prefix + pickName;
 }
 
 module.exports = async (req, res) => {
@@ -71,15 +89,24 @@ module.exports = async (req, res) => {
   const text = (body && body.text ? String(body.text) : "").slice(0, MAX_TEXT);
   if (!text.trim()) { res.status(400).json({ error: "no text" }); return; }
 
+  // 언어: "ja"(기본) | "ko". languageCode("ko-KR")로 와도 앞 두 글자로 인식.
+  let lang = (body && body.lang ? String(body.lang) : "ja").toLowerCase();
+  if (lang.startsWith("ko")) lang = "ko";
+  else lang = "ja";
+
   const gender = body.gender || "random";       // 'female' | 'male' | 'random'
   const voiceName = body.voice || "";           // 특정 이름 지정 시
   const rate = Math.min(2.0, Math.max(0.25, Number(body.rate) || 1.0)); // 0.25~2.0
 
-  const voice = pickVoice(gender, voiceName);
+  const voice = pickVoice(lang, gender, voiceName);
+  const languageCode = (LANG[lang] || LANG.ja).code;
+
+  const voiceObj = { languageCode };
+  if (voice) voiceObj.name = voice; // 이름이 있을 때만 지정(없으면 기본 음성)
 
   const payload = {
     input: { text },
-    voice: { languageCode: "ja-JP", name: voice },
+    voice: voiceObj,
     audioConfig: { audioEncoding: "MP3", speakingRate: rate },
   };
 
